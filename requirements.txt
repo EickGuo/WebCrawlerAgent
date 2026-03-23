@@ -1,0 +1,10 @@
+langgraph
+langchain
+langchain-openai
+openai
+beautifulsoup4
+requests
+playwright
+filelock
+dotenv
+pydantic

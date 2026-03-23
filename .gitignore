@@ -1,0 +1,25 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# VS Code environment
+.vscode/
+
+# Virtual Environment
+myenv/
+venv/
+env/
+.env
+
+# Playwright
+.playwright/
+
+# OS Specific
+.DS_Store
+Thumbs.db
+
+debug_log.json
+test.py
+hyperparams.md
+problem.md
