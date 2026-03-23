@@ -21,6 +21,9 @@ from nodes import (
     code_finalizer,
 )
 
+from user_information import user_information
+import json
+
 
 def route_by_strategy(state: CrawlerState):
     return state.get("strategy", "static")
@@ -117,18 +120,17 @@ builder.add_edge("code_finalizer", END)
 graph = builder.compile()
 
 if __name__ == "__main__":
+    user_information = user_information()
     init_state: CrawlerState = {
-        "url": "http://221.229.125.247:18080/tard/outside!getYajy.do?_r=0.27991238734356816&type=1&conId=9124",
-        "user_request": "提取市九届人大四次会议的所有建议案信息。这只是第一页，后面还有很多页。同时，我不仅需要首页的信息，我还希望获取建议案和答复的具体文本内容。我希望你用动态页面的方式提取信息，最终结果按照json模式存储文件。",
-        "max_exploration_steps": 10,
-        "max_detail_samples": 3,
-        "max_debug_rounds": 2,
+        "url": user_information["url"],
+        "user_request": user_information["user_request"],
+        "max_exploration_steps": user_information["max_exploration_steps"],
+        "max_detail_samples": user_information["max_detail_samples"],
+        "max_debug_rounds": user_information["max_debug_rounds"],
         "debug_count": 0,
         "trace": [],
         "metadata": {},
     }
-
-import json
 
 with open("debug_log.json", "w", encoding="utf-8") as f:
     for step in graph.stream(init_state):
