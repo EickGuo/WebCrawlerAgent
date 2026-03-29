@@ -90,6 +90,7 @@ def validate_exploration_decision(obj: Dict[str, Any]) -> Dict[str, Any]:
         "get_page_snapshot",
         "list_links",
         "list_buttons",
+        "search_site",
         "click_target",
         "click",
         "goto",
@@ -116,6 +117,20 @@ def validate_exploration_decision(obj: Dict[str, Any]) -> Dict[str, Any]:
         limit = ensure_int(args.get("limit"))
         if limit is not None and limit > 0:
             validated_args["limit"] = limit
+    elif tool == "search_site":
+        query = ensure_str(args.get("query")).strip()
+        input_selector = ensure_str(args.get("input_selector")).strip()
+        if not query or not input_selector:
+            raise ValueError("search_site requires args.query and args.input_selector")
+        validated_args["query"] = query
+        validated_args["input_selector"] = input_selector
+        for key in ("submit_selector", "submit_text", "scope_selector", "result_selector"):
+            value = ensure_str(args.get(key)).strip()
+            if value:
+                validated_args[key] = value
+        press_enter = ensure_optional_bool(args.get("press_enter"))
+        if press_enter is not None:
+            validated_args["press_enter"] = press_enter
     elif tool == "click_target":
         for key in ("scope_selector", "selector", "element_selector", "text"):
             value = ensure_str(args.get(key)).strip()

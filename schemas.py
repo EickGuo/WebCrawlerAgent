@@ -12,6 +12,7 @@ class ExplorationDecision(BaseModel):
         "get_page_snapshot",
         "list_links",
         "list_buttons",
+        "search_site",
         "click_target",
         "click",
         "goto",
@@ -25,10 +26,10 @@ class ExplorationDecision(BaseModel):
     args: Dict[str, Any] = Field(default_factory=dict)
 
 class ScrapingPlan(BaseModel):
-    model: Literal["static", "dynamic"]
+    mode: Literal["static", "dynamic"]
     entry_url: str
     page_pattern: str
-    required_actions: List[Dict[str, Any]] = Field(default_factory=dict)
+    required_actions: List[Dict[str, Any]] = Field(default_factory=list)
     list_page: Dict[str, Any] = Field(default_factory=dict)
     detail_page: Dict[str, Any] = Field(default_factory=dict)
     selectors: Dict[str, Any] = Field(default_factory=dict)
