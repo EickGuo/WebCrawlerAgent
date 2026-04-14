@@ -96,7 +96,7 @@ html_loader
                  -> END
 ```
 
-If exploration is blocked by login, captcha, or verification, it returns a human-intervention summary to the main state and stops before code export.
+If exploration is blocked by login, captcha, or verification, it returns a human-intervention summary to the main state and stops before code export. You can refer to ```project_logic.md`` (in Chinese) for more detailed information.
 
 ## Main Files
 
