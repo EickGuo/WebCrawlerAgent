@@ -1,0 +1,8 @@
+- `finish`: stop exploration after key interactions have been verified.
+- `search_site`: perform an on-page search when the request depends on a keyword or name.
+- `click_target`: click an element using multiple constraints when similar elements may exist.
+- `goto`: navigate to a directly usable URL.
+- `go_back`: return to the previous page after detail inspection or a failed navigation.
+- `wait_for_selector`: verify that a target element appears after an interaction.
+- `scroll_once`: reveal more content when the page likely lazy-loads.
+- `sample_detail_pages`: inspect candidate detail links directly before finalizing detail logic.

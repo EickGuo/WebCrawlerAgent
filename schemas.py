@@ -9,18 +9,12 @@ class ExplorationDecision(BaseModel):
     reasoning: str
     tool: Literal[
         "finish",
-        "get_page_snapshot",
-        "list_links",
-        "list_buttons",
         "search_site",
         "click_target",
-        "click",
         "goto",
         "go_back",
         "wait_for_selector",
         "scroll_once",
-        "extract_preview",
-        "count_selector",
         "sample_detail_pages"
     ]
     args: Dict[str, Any] = Field(default_factory=dict)
@@ -32,8 +26,10 @@ class ScrapingPlan(BaseModel):
     required_actions: List[Dict[str, Any]] = Field(default_factory=list)
     list_page: Dict[str, Any] = Field(default_factory=dict)
     detail_page: Dict[str, Any] = Field(default_factory=dict)
+    reference_html_snippets: Dict[str, Any] = Field(default_factory=dict)
     selectors: Dict[str, Any] = Field(default_factory=dict)
     validation: Dict[str, Any] = Field(default_factory=dict)
+    observations: List[Any] = Field(default_factory=list)
     notes: str = ""
 
 class EvaluationDecision(BaseModel):

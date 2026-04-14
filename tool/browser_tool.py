@@ -1,27 +1,63 @@
-import re
-from collections import Counter
-from typing import Any, Dict, List
-import os
-from urllib.parse import urljoin
-from dotenv import load_dotenv
+"""Browser interaction tools and browser-session utilities."""
 
-import requests
-from bs4 import BeautifulSoup
+from __future__ import annotations
+
+import random
+from typing import Any
+from urllib.parse import urljoin
+
+from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
 
+load_dotenv()
+
+BROWSER_TOOL_NAMES = [
+    "finish",
+    "search_site",
+    "click_target",
+    "goto",
+    "go_back",
+    "wait_for_selector",
+    "scroll_once",
+    "sample_detail_pages",
+]
+
 HUMAN_GATE_KEYWORDS = {
     "login_required": [
-        "登录", "登陆", "sign in", "log in", "账号登录", "用户登录", "请输入用户名", "请输入密码",
+        "登录",
+        "登陆",
+        "sign in",
+        "log in",
+        "账号登录",
+        "用户登录",
+        "请输入用户名",
+        "请输入密码",
     ],
     "captcha_required": [
-        "验证码", "captcha", "请输入验证码", "图形验证码", "滑块", "请完成验证", "安全验证",
+        "验证码",
+        "captcha",
+        "请输入验证码",
+        "图形验证码",
+        "滑块",
+        "请完成验证",
+        "安全验证",
     ],
     "2fa_required": [
-        "短信验证码", "手机验证码", "动态码", "二次验证", "双重验证", "2fa", "otp",
+        "短信验证码",
+        "手机验证码",
+        "动态码",
+        "二次验证",
+        "双重验证",
+        "2fa",
+        "otp",
     ],
     "verification_required": [
-        "人机验证", "verify", "verification", "身份验证", "安全校验",
+        "人机验证",
+        "verify",
+        "verification",
+        "身份验证",
+        "安全校验",
     ],
 }
 
@@ -46,8 +82,54 @@ HUMAN_GATE_SELECTORS = {
     ],
 }
 
+INTERRUPT_OVERLAY_SELECTORS = [
+    "[role='dialog']",
+    "[aria-modal='true']",
+    "[class*='modal']",
+    "[class*='dialog']",
+    "[class*='popup']",
+    "[class*='overlay']",
+    "[class*='mask']",
+]
 
-def _tool_result(action: str, success: bool, **kwargs) -> Dict[str, Any]:
+INTERRUPT_CLOSE_SELECTORS = [
+    "button[aria-label='Close']",
+    "button[aria-label='close']",
+    "[aria-label='Close']",
+    "[aria-label='close']",
+    ".close",
+    ".btn-close",
+    ".modal-close",
+    ".dialog-close",
+    ".popup-close",
+    "[class*='close']",
+    "[id*='close']",
+    "[data-testid*='close']",
+]
+
+INTERRUPT_CLOSE_TEXTS = [
+    "关闭",
+    "关闭弹窗",
+    "跳过",
+    "稍后",
+    "我知道了",
+    "以后再说",
+    "暂不",
+    "not now",
+    "skip",
+    "close",
+    "dismiss",
+    "maybe later",
+    "no thanks",
+    "cancel",
+]
+
+
+def list_browser_tools() -> list[str]:
+    return list(BROWSER_TOOL_NAMES)
+
+
+def _tool_result(action: str, success: bool, **kwargs) -> dict[str, Any]:
     result = {
         "action": action,
         "success": success,
@@ -58,98 +140,11 @@ def _tool_result(action: str, success: bool, **kwargs) -> Dict[str, Any]:
     return result
 
 
-# ----------------------------
-# initial page load
-# ----------------------------
+def _wait_random_for_page(page, min_ms: int, max_ms: int) -> None:
+    if page is None:
+        return
+    page.wait_for_timeout(random.randint(min_ms, max_ms))
 
-def load_page(url: str, timeout: int = 20) -> str:
-    headers = {
-        "User-Agent": os.getenv("USER_AGENT")
-    }
-    resp = requests.get(url, headers=headers, timeout=timeout)
-    resp.raise_for_status()
-    return resp.text
-
-
-def clean_dom_for_llm(soup: BeautifulSoup):
-    for tag in soup(["script", "style", "noscript", "svg", "path", "symbol", "use"]):
-        tag.decompose()
-        
-    allowed_attrs = {"class", "id", "href"}
-    for tag in soup.find_all(True):
-        attrs = dict(tag.attrs)
-        for attr in attrs:
-            if attr not in allowed_attrs:
-                del tag[attr]
-
-def summarize_html_for_prompt(html: str, max_len: int = 5000) -> str:
-    soup = BeautifulSoup(html, "html.parser")
-    clean_dom_for_llm(soup)
-
-    text = soup.prettify()
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text[:max_len]
-
-# ----------------------------
-# DOM summary
-# ----------------------------
-
-def summarize_rendered_dom(html: str, max_len: int = 5000) -> Dict[str, Any]:
-    soup = BeautifulSoup(html, "html.parser")
-    clean_dom_for_llm(soup)
-
-    links = []
-    for a in soup.find_all("a", href=True):
-        links.append({
-            "text": a.get_text(" ", strip=True)[:80],
-            "href": a.get("href"),
-        })
-
-    buttons = []
-    for b in soup.find_all("button"):
-        buttons.append({
-            "text": b.get_text(" ", strip=True)[:80],
-            "class": " ".join(b.get("class", []))[:120],
-        })
-
-    inputs = []
-    for node in soup.find_all(["input", "textarea"]):
-        inputs.append({
-            "type": (node.get("type") or node.name or "")[:40],
-            "name": (node.get("name") or "")[:80],
-            "id": (node.get("id") or "")[:80],
-            "placeholder": (node.get("placeholder") or "")[:120],
-        })
-
-    candidate_blocks = []
-    for selector_name in ["div", "li", "article", "tr"]:
-        nodes = soup.find_all(selector_name)
-        if len(nodes) >= 5:
-            candidate_blocks.append({
-                "tag": selector_name,
-                "count": len(nodes),
-            })
-
-    script_snippets = []
-    raw_soup = BeautifulSoup(html, "html.parser")
-    for script in raw_soup.find_all("script"):
-        script_text = script.get_text(" ", strip=True)
-        if script_text:
-            script_snippets.append(script_text[:500])
-
-    return {
-        "local_snippet": soup.prettify()[:max_len],
-        "links": links,
-        "buttons": buttons,
-        "inputs": inputs[:20],
-        "candidate_blocks": candidate_blocks[:10],
-        "script_snippets": script_snippets[:10],
-    }
-
-
-# ----------------------------
-# Browser session
-# ----------------------------
 
 class BrowserSession:
     def __init__(self):
@@ -157,12 +152,25 @@ class BrowserSession:
         self.browser = None
         self.page = None
 
+    def _wait_random(self, min_ms: int, max_ms: int) -> None:
+        if not self.page:
+            return
+        self.page.wait_for_timeout(random.randint(min_ms, max_ms))
+
+    def _humanized_pre_action_pause(self) -> None:
+        self._wait_random(180, 650)
+
+    def _humanized_post_action_pause(self, base_ms: int) -> None:
+        jitter = random.randint(150, 900)
+        self.page.wait_for_timeout(base_ms + jitter)
+
     def start(self, url: str, wait_ms: int = 3000):
         self.play = sync_playwright().start()
         self.browser = self.play.chromium.launch(headless=False)
         self.page = self.browser.new_page()
+        self._wait_random(250, 900)
         self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        self.page.wait_for_timeout(wait_ms)
+        self._humanized_post_action_pause(wait_ms)
 
     def close(self):
         try:
@@ -192,13 +200,15 @@ class BrowserSession:
     def title(self) -> str:
         return self.page.title()
 
-    def snapshot_human_gate(self) -> Dict[str, Any]:
+    def snapshot_human_gate(self) -> dict[str, Any]:
         return detect_human_intervention(self.page)
 
-    def current_snapshot(self) -> Dict[str, Any]:
+    def current_snapshot(self) -> dict[str, Any]:
+        from .pageread_tool import build_page_snapshot
+
         return build_page_snapshot()
 
-    def wait_for_manual_resolution(self, reason: str = "", timeout_seconds: int = 600) -> Dict[str, Any]:
+    def wait_for_manual_resolution(self, reason: str = "", timeout_seconds: int = 600) -> dict[str, Any]:
         prompt = (
             "\n[Human Gate] Detected a page requiring manual action."
             f"\nReason: {reason or 'unknown'}"
@@ -210,31 +220,6 @@ class BrowserSession:
             return {"success": False, "aborted": True}
         return {"success": True}
 
-    def list_buttons(self, limit: int = 20) -> List[str]:
-        try:
-            return [x.strip() for x in self.page.locator("button").all_text_contents()[:limit] if x.strip()]
-        except Exception:
-            return []
-
-    def list_links(self, selector: str = "a", limit: int | None = 20) -> Dict[str, Any]:
-        try:
-            loc = self.page.locator(selector)
-            count = loc.count()
-            n = count if limit is None else min(count, limit)
-            items = []
-            for i in range(n):
-                link = loc.nth(i)
-                href = link.get_attribute("href")
-                text = ""
-                try:
-                    text = link.inner_text().strip()[:200]
-                except Exception:
-                    pass
-                items.append({"text": text, "href": href})
-            return {"success": True, "items": items}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
     def search_site(
         self,
         *,
@@ -245,17 +230,21 @@ class BrowserSession:
         scope_selector: str | None = None,
         press_enter: bool = True,
         result_selector: str | None = None,
-    ) -> Dict[str, Any]:
-        url_before = self.page.url if self.page else ""
+    ) -> dict[str, Any]:
         try:
             scope = self.page.locator(scope_selector) if scope_selector else self.page
             input_box = scope.locator(input_selector).first if scope_selector else self.page.locator(input_selector).first
+            self._humanized_pre_action_pause()
             input_box.click(timeout=5000)
+            self._wait_random(120, 420)
             input_box.fill("")
+            self._wait_random(120, 360)
             input_box.fill(query)
+            self._wait_random(220, 720)
 
             if submit_selector:
                 submit = scope.locator(submit_selector).first if scope_selector else self.page.locator(submit_selector).first
+                self._humanized_pre_action_pause()
                 submit.click(timeout=5000)
             elif submit_text:
                 target = self.click_target(
@@ -269,8 +258,6 @@ class BrowserSession:
                     return _tool_result(
                         "search_site",
                         False,
-                        url_before=url_before,
-                        url_after=url_before,
                         error=target.get("error", "search submit failed"),
                     )
             elif press_enter:
@@ -280,9 +267,9 @@ class BrowserSession:
                 self.page.wait_for_load_state("domcontentloaded", timeout=30000)
             except Exception:
                 pass
-            self.page.wait_for_timeout(1500)
+            self._humanized_post_action_pause(1500)
         except Exception as e:
-            return _tool_result("search_site", False, url_before=url_before, url_after=url_before, error=str(e))
+            return _tool_result("search_site", False, error=str(e))
 
         selector_error = ""
         if result_selector:
@@ -294,8 +281,6 @@ class BrowserSession:
         return _tool_result(
             "search_site",
             True,
-            url_before=url_before,
-            url_after=self.page.url,
             query=query,
             input_selector=input_selector,
             submit_selector=submit_selector or "",
@@ -315,8 +300,7 @@ class BrowserSession:
         exact: bool = False,
         index: int = 0,
         known_selector: str | None = None,
-    ) -> Dict[str, Any]:
-        url_before = self.page.url if self.page else ""
+    ) -> dict[str, Any]:
         try:
             if selector:
                 locator = self.page.locator(selector)
@@ -358,8 +342,6 @@ class BrowserSession:
                 return _tool_result(
                     "click_target",
                     False,
-                    url_before=url_before,
-                    url_after=url_before,
                     error="No matching element found",
                     selector=selector or element_selector or scope_selector or "",
                     text=normalized_text,
@@ -378,12 +360,13 @@ class BrowserSession:
             except Exception:
                 clicked_href = None
 
+            self._humanized_pre_action_pause()
             target.click(timeout=5000)
             try:
                 self.page.wait_for_load_state("domcontentloaded", timeout=30000)
             except Exception:
                 pass
-            self.page.wait_for_timeout(1200)
+            self._humanized_post_action_pause(1200)
 
             selector_error = ""
             if known_selector:
@@ -395,8 +378,6 @@ class BrowserSession:
             return _tool_result(
                 "click_target",
                 True,
-                url_before=url_before,
-                url_after=self.page.url,
                 human_gate=human_gate,
                 snapshot=self.current_snapshot(),
                 clicked_text=clicked_text,
@@ -413,18 +394,16 @@ class BrowserSession:
             return _tool_result(
                 "click_target",
                 False,
-                url_before=url_before,
-                url_after=url_before,
                 error=str(e),
             )
 
-    def safe_goto(self, url: str, known_selector: str | None = None) -> Dict[str, Any]:
-        url_before = self.page.url if self.page else ""
+    def safe_goto(self, url: str, known_selector: str | None = None) -> dict[str, Any]:
         try:
+            self._wait_random(220, 850)
             self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            self.page.wait_for_timeout(3000)
+            self._humanized_post_action_pause(3000)
         except Exception as e:
-            return _tool_result("safe_goto", False, url_before=url_before, url_after=url_before, error=str(e))
+            return _tool_result("safe_goto", False, error=str(e))
 
         if known_selector:
             try:
@@ -439,20 +418,18 @@ class BrowserSession:
         return _tool_result(
             "safe_goto",
             True,
-            url_before=url_before,
-            url_after=self.page.url,
             human_gate=human_gate,
             snapshot=self.current_snapshot(),
             selector_error=selector_error,
         )
 
-    def safe_go_back(self, known_selector: str | None = None) -> Dict[str, Any]:
-        url_before = self.page.url if self.page else ""
+    def safe_go_back(self, known_selector: str | None = None) -> dict[str, Any]:
         try:
+            self._wait_random(180, 700)
             self.page.go_back(wait_until="domcontentloaded", timeout=30000)
-            self.page.wait_for_timeout(3000)
+            self._humanized_post_action_pause(3000)
         except Exception as e:
-            return _tool_result("safe_go_back", False, url_before=url_before, url_after=url_before, error=str(e))
+            return _tool_result("safe_go_back", False, error=str(e))
 
         if known_selector:
             try:
@@ -467,24 +444,22 @@ class BrowserSession:
         return _tool_result(
             "safe_go_back",
             True,
-            url_before=url_before,
-            url_after=self.page.url,
             human_gate=human_gate,
             snapshot=self.current_snapshot(),
             selector_error=selector_error,
         )
 
-    def safe_click(self, selector: str, known_selector: str | None = None) -> Dict[str, Any]:
-        url_before = self.page.url if self.page else ""
+    def safe_click(self, selector: str, known_selector: str | None = None) -> dict[str, Any]:
         try:
+            self._humanized_pre_action_pause()
             self.page.locator(selector).first.click(timeout=5000)
             try:
                 self.page.wait_for_load_state("domcontentloaded", timeout=30000)
             except Exception:
                 pass
-            self.page.wait_for_timeout(1200)
+            self._humanized_post_action_pause(1200)
         except Exception as e:
-            return _tool_result("safe_click", False, url_before=url_before, url_after=url_before, error=str(e))
+            return _tool_result("safe_click", False, error=str(e))
 
         if known_selector:
             try:
@@ -499,15 +474,13 @@ class BrowserSession:
         return _tool_result(
             "safe_click",
             True,
-            url_before=url_before,
-            url_after=self.page.url,
             human_gate=human_gate,
             snapshot=self.current_snapshot(),
             selector=selector,
             selector_error=selector_error,
         )
 
-    def safe_wait_for_selector(self, selector: str) -> Dict[str, Any]:
+    def safe_wait_for_selector(self, selector: str) -> dict[str, Any]:
         try:
             self.page.wait_for_selector(selector, timeout=5000)
             result = {"success": True}
@@ -522,10 +495,11 @@ class BrowserSession:
             human_gate=human_gate,
         )
 
-    def safe_scroll_once(self) -> Dict[str, Any]:
+    def safe_scroll_once(self) -> dict[str, Any]:
         try:
+            self._humanized_pre_action_pause()
             self.page.evaluate("window.scrollBy(0, document.body.scrollHeight * 0.8)")
-            self.page.wait_for_timeout(1500)
+            self._humanized_post_action_pause(1500)
             result = {"success": True}
         except Exception as e:
             result = {"success": False, "error": str(e)}
@@ -538,25 +512,7 @@ class BrowserSession:
             snapshot=self.current_snapshot() if result.get("success") else {},
         )
 
-    def count_selector(self, selector: str) -> Dict[str, Any]:
-        try:
-            return {"success": True, "count": self.page.locator(selector).count()}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    def extract_preview(self, selector: str, limit: int = None) -> Dict[str, Any]:
-        try:
-            loc = self.page.locator(selector)
-            n = loc.count() if limit is None else min(loc.count(), limit)
-            items = []
-            for i in range(n):
-                txt = loc.nth(i).inner_text()
-                items.append(txt.strip()[:300] if txt else "")
-            return {"success": True, "items": items}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    def extract_text(self, selector: str, limit: int | None = 1) -> Dict[str, Any]:
+    def extract_text(self, selector: str, limit: int | None = 1) -> dict[str, Any]:
         try:
             loc = self.page.locator(selector)
             count = loc.count()
@@ -576,7 +532,7 @@ class BrowserSession:
         *,
         cell_selector: str = "th, td",
         limit: int | None = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         try:
             rows = self.page.locator(row_selector)
             count = rows.count()
@@ -603,6 +559,7 @@ class BrowserSession:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+
 GLOBAL_BROWSER: BrowserSession | None = None
 
 
@@ -620,7 +577,7 @@ def close_browser():
         GLOBAL_BROWSER = None
 
 
-def detect_human_intervention(page) -> Dict[str, Any]:
+def detect_human_intervention(page) -> dict[str, Any]:
     if page is None:
         return {"required": False, "reason": "", "evidence": []}
 
@@ -639,10 +596,10 @@ def detect_human_intervention(page) -> Dict[str, Any]:
 
     body_text = ""
     try:
-        body_text = page.locator("body").inner_text(timeout=3000)[:4000]
+        body_text = page.locator("body").inner_text(timeout=3000)
     except Exception:
         try:
-            body_text = page.content()[:4000]
+            body_text = page.content()
         except Exception:
             body_text = ""
 
@@ -676,30 +633,133 @@ def detect_human_intervention(page) -> Dict[str, Any]:
     return {
         "required": bool(reason),
         "reason": reason,
-        "evidence": evidence[:8],
+        "evidence": evidence,
         "url": current_url,
         "title": title,
     }
 
 
-# ----------------------------
-# Understanding pages
-# ----------------------------
+def _collect_visible_selector_candidates(page, selectors: list[str]) -> list[dict[str, str]]:
+    candidates: list[dict[str, str]] = []
+    for selector in selectors:
+        try:
+            locator = page.locator(selector)
+            count = min(locator.count(), 3)
+        except Exception:
+            continue
+        for i in range(count):
+            try:
+                node = locator.nth(i)
+                if not node.is_visible():
+                    continue
+                candidates.append({"kind": "selector", "value": selector, "index": str(i)})
+                break
+            except Exception:
+                continue
+    return candidates
 
-def build_page_snapshot() -> Dict[str, Any]:
-    browser = get_browser()
-    html = browser.content()
-    dom = summarize_rendered_dom(html)
+
+def _collect_visible_text_candidates(page, texts: list[str]) -> list[dict[str, str]]:
+    candidates: list[dict[str, str]] = []
+    for text in texts:
+        try:
+            locator = page.get_by_text(text, exact=False)
+            count = min(locator.count(), 3)
+        except Exception:
+            continue
+        for i in range(count):
+            try:
+                node = locator.nth(i)
+                if not node.is_visible():
+                    continue
+                candidates.append({"kind": "text", "value": text, "index": str(i)})
+                break
+            except Exception:
+                continue
+    return candidates
+
+
+def detect_interrupting_overlay(page) -> dict[str, Any]:
+    if page is None:
+        return {"required": False, "reason": "", "evidence": [], "close_candidates": []}
+
+    evidence: list[str] = []
+    close_candidates: list[dict[str, str]] = []
+
+    for selector in INTERRUPT_OVERLAY_SELECTORS:
+        try:
+            locator = page.locator(selector)
+            count = min(locator.count(), 3)
+        except Exception:
+            count = 0
+        visible_count = 0
+        for i in range(count):
+            try:
+                if locator.nth(i).is_visible():
+                    visible_count += 1
+            except Exception:
+                continue
+        if visible_count:
+            evidence.append(f"visible overlay selector: {selector} x{visible_count}")
+
+    close_candidates.extend(_collect_visible_selector_candidates(page, INTERRUPT_CLOSE_SELECTORS))
+    close_candidates.extend(_collect_visible_text_candidates(page, INTERRUPT_CLOSE_TEXTS))
+
+    required = bool(evidence and close_candidates)
+    return {
+        "required": required,
+        "reason": "dismissible_overlay" if required else "",
+        "evidence": evidence,
+        "close_candidates": close_candidates,
+    }
+
+
+def try_close_interrupting_overlay(page) -> dict[str, Any]:
+    detection = detect_interrupting_overlay(page)
+    if not detection.get("required"):
+        return {"handled": False, "success": False, "reason": "", "evidence": [], "snapshot": {}}
+
+    for candidate in detection.get("close_candidates", []):
+        try:
+            if candidate.get("kind") == "selector":
+                locator = page.locator(candidate["value"]).nth(int(candidate.get("index", "0")))
+            else:
+                locator = page.get_by_text(candidate["value"], exact=False).nth(int(candidate.get("index", "0")))
+            _wait_random_for_page(page, 180, 650)
+            locator.click(timeout=3000)
+            try:
+                page.wait_for_load_state("domcontentloaded", timeout=5000)
+            except Exception:
+                pass
+            _wait_random_for_page(page, 900, 1600)
+        except Exception:
+            continue
+
+        remaining_overlay = detect_interrupting_overlay(page)
+        human_gate = detect_human_intervention(page)
+        if not remaining_overlay.get("required"):
+            try:
+                from .pageread_tool import build_page_snapshot
+
+                snapshot = build_page_snapshot()
+            except Exception:
+                snapshot = {}
+            return {
+                "handled": True,
+                "success": True,
+                "reason": "dismissible_overlay_closed",
+                "evidence": detection.get("evidence", []),
+                "close_candidate": candidate,
+                "human_gate": human_gate,
+                "snapshot": snapshot,
+            }
 
     return {
-        "url": browser.url(),
-        "title": browser.title(),
-        "local_snippet": dom["local_snippet"],
-        "links": dom["links"],
-        "buttons": dom["buttons"],
-        "inputs": dom["inputs"],
-        "candidate_blocks": dom["candidate_blocks"],
-        "script_snippets": dom["script_snippets"],
+        "handled": False,
+        "success": False,
+        "reason": "dismissible_overlay_unresolved",
+        "evidence": detection.get("evidence", []),
+        "snapshot": {},
     }
 
 
@@ -709,7 +769,9 @@ def absolutize_url(url: str, base_url: str) -> str:
     return urljoin(base_url, url)
 
 
-def sample_detail_pages(links: List[Dict[str, Any]], limit: int = 2) -> List[Dict[str, Any]]:
+def sample_detail_pages(links: list[dict[str, Any]], limit: int = 2) -> list[dict[str, Any]]:
+    from .pageread_tool import build_page_snapshot
+
     browser = get_browser()
     origin_url = browser.url()
     samples = []
@@ -721,14 +783,16 @@ def sample_detail_pages(links: List[Dict[str, Any]], limit: int = 2) -> List[Dic
         href = str(item.get("href") or "").strip()
         if not href:
             continue
-        normalized_links.append({
-            "href": href,
-            "source_href": str(item.get("source_href") or href).strip(),
-            "text": str(item.get("text") or "").strip(),
-            "kind": str(item.get("kind") or "").strip(),
-            "detail_id": str(item.get("detail_id") or "").strip(),
-            "resolver": str(item.get("resolver") or "").strip(),
-        })
+        normalized_links.append(
+            {
+                "href": href,
+                "source_href": str(item.get("source_href") or href).strip(),
+                "text": str(item.get("text") or "").strip(),
+                "kind": str(item.get("kind") or "").strip(),
+                "detail_id": str(item.get("detail_id") or "").strip(),
+                "resolver": str(item.get("resolver") or "").strip(),
+            }
+        )
 
     for item in normalized_links[:limit]:
         href = absolutize_url(item.get("href"), origin_url)
@@ -737,52 +801,35 @@ def sample_detail_pages(links: List[Dict[str, Any]], limit: int = 2) -> List[Dic
 
         result = browser.safe_goto(href)
         if not result.get("success"):
-            samples.append({
-                "href": href,
+            samples.append(
+                {
+                    "href": href,
+                    "source_href": item.get("source_href", href),
+                    "text": item.get("text", ""),
+                    "kind": item.get("kind", ""),
+                    "detail_id": item.get("detail_id", ""),
+                    "resolver": item.get("resolver", ""),
+                    "success": False,
+                    "error": result.get("error", ""),
+                }
+            )
+            continue
+
+        snapshot = build_page_snapshot()
+        samples.append(
+            {
+                "href": browser.url(),
                 "source_href": item.get("source_href", href),
                 "text": item.get("text", ""),
                 "kind": item.get("kind", ""),
                 "detail_id": item.get("detail_id", ""),
                 "resolver": item.get("resolver", ""),
-                "success": False,
-                "error": result.get("error", ""),
-            })
-            continue
-
-        snapshot = build_page_snapshot()
-        samples.append({
-            "href": browser.url(),
-            "source_href": item.get("source_href", href),
-            "text": item.get("text", ""),
-            "kind": item.get("kind", ""),
-            "detail_id": item.get("detail_id", ""),
-            "resolver": item.get("resolver", ""),
-            "success": True,
-            "title": snapshot["title"],
-            "local_snippet": snapshot["local_snippet"],
-        })
+                "success": True,
+                "title": snapshot["title"],
+                "page_architecture": snapshot.get("page_architecture", ""),
+                "snapshot": snapshot,
+            }
+        )
 
     browser.safe_goto(origin_url)
     return samples
-
-
-def heuristic_evaluate(result: str, error: str) -> tuple[bool, str]:
-    if error and error.strip():
-        return False, "stderr is non-empty"
-    if not result or not result.strip():
-        return False, "stdout is empty"
-
-    low = result.lower()
-    for signal in [
-        "access denied",
-        "forbidden",
-        "captcha",
-        "robot check",
-        "please enable javascript",
-        "sign in",
-        "login",
-    ]:
-        if signal in low:
-            return False, f"suspicious output: {signal}"
-
-    return True, "heuristic check passed"

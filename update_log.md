@@ -17,3 +17,12 @@
 - Added on-site search via `search_site`
 - Added human-gate pause/resume for login, captcha, and verification
 - Simplified state memory
+
+## v0.3
+
+- Rebuilt `exploration` as a LangGraph subgraph
+- Simplified exploration state and removed redundant summaries
+- Moved tool cautions into `tool/*.md` and Switched progressive disclosure to full snapshot + per-tool docs
+- Added post-tool interrupt detection for captcha and blocking overlays, and auto-close flow for dismissible irrelevant popups before human intervention
+- Added lightweight randomized waits around sensitive browser actions in `tool/browser_tool.py`, and updated `code_exporter` to instruct generated code to keep similar human-like timing
+- Reorganized `tool/` into grouped registries (`browser_tool.py`, `pageread_tool.py`) and moved tool explanations into `tool/browser_tool_explanation/`
