@@ -27,3 +27,4 @@ problem.md
 exports/
 debug/
 douban_movies.json
+session.json

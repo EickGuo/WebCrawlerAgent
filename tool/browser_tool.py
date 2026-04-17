@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import json
 import random
+from datetime import datetime
+from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
 
 load_dotenv()
+
+SESSION_FILE = Path(__file__).resolve().parent.parent / "session.json"
 
 BROWSER_TOOL_NAMES = [
     "finish",
@@ -129,6 +134,72 @@ def list_browser_tools() -> list[str]:
     return list(BROWSER_TOOL_NAMES)
 
 
+def _ensure_session_file() -> None:
+    if SESSION_FILE.exists():
+        return
+    SESSION_FILE.write_text(
+        json.dumps({"sessions": {}}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _load_session_payload() -> dict[str, Any]:
+    _ensure_session_file()
+    try:
+        payload = json.loads(SESSION_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        payload = {"sessions": {}}
+    if not isinstance(payload, dict):
+        payload = {"sessions": {}}
+    sessions = payload.get("sessions")
+    if not isinstance(sessions, dict):
+        payload["sessions"] = {}
+    return payload
+
+
+def _write_session_payload(payload: dict[str, Any]) -> None:
+    SESSION_FILE.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _session_key_for_url(url: str) -> str:
+    try:
+        return (urlparse(url).netloc or "").strip().lower()
+    except Exception:
+        return ""
+
+
+def _get_session_state_for_url(url: str) -> dict[str, Any] | None:
+    key = _session_key_for_url(url)
+    if not key:
+        return None
+    payload = _load_session_payload()
+    entry = payload.get("sessions", {}).get(key, {})
+    if not isinstance(entry, dict):
+        return None
+    storage_state = entry.get("storage_state")
+    return storage_state if isinstance(storage_state, dict) else None
+
+
+def _save_session_state_for_keys(keys: list[str], storage_state: dict[str, Any]) -> None:
+    if not isinstance(storage_state, dict):
+        return
+    clean_keys = [k for k in {str(key).strip().lower() for key in keys if str(key).strip()} if k]
+    if not clean_keys:
+        return
+    payload = _load_session_payload()
+    sessions = payload.setdefault("sessions", {})
+    timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+    for key in clean_keys:
+        sessions[key] = {
+            "updated_at": timestamp,
+            "storage_state": storage_state,
+        }
+    _write_session_payload(payload)
+
+
 def _tool_result(action: str, success: bool, **kwargs) -> dict[str, Any]:
     result = {
         "action": action,
@@ -150,7 +221,9 @@ class BrowserSession:
     def __init__(self):
         self.play = None
         self.browser = None
+        self.context = None
         self.page = None
+        self.current_session_key = ""
 
     def _wait_random(self, min_ms: int, max_ms: int) -> None:
         if not self.page:
@@ -165,20 +238,37 @@ class BrowserSession:
         self.page.wait_for_timeout(base_ms + jitter)
 
     def start(self, url: str, wait_ms: int = 3000):
+        _ensure_session_file()
         self.play = sync_playwright().start()
         self.browser = self.play.chromium.launch(headless=False)
-        self.page = self.browser.new_page()
+        self.current_session_key = _session_key_for_url(url)
+        storage_state = _get_session_state_for_url(url)
+        if storage_state:
+            try:
+                self.context = self.browser.new_context(storage_state=storage_state)
+            except Exception:
+                self.context = self.browser.new_context()
+        else:
+            self.context = self.browser.new_context()
+        self.page = self.context.new_page()
         self._wait_random(250, 900)
         self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
         self._humanized_post_action_pause(wait_ms)
 
     def close(self):
         try:
+            self._persist_session_if_possible()
+            if self.context:
+                self.context.close()
             if self.browser:
                 self.browser.close()
         finally:
             if self.play:
                 self.play.stop()
+            self.context = None
+            self.browser = None
+            self.page = None
+            self.current_session_key = ""
 
     def content(self) -> str:
         for _ in range(5):
@@ -218,7 +308,25 @@ class BrowserSession:
         user_input = input(prompt).strip().lower()
         if user_input == "abort":
             return {"success": False, "aborted": True}
+        self._persist_session_if_possible()
         return {"success": True}
+
+    def _persist_session_if_possible(self) -> None:
+        if not self.context:
+            return
+        try:
+            storage_state = self.context.storage_state()
+        except Exception:
+            return
+        current_url = ""
+        try:
+            current_url = self.url()
+        except Exception:
+            current_url = ""
+        _save_session_state_for_keys(
+            [self.current_session_key, _session_key_for_url(current_url)],
+            storage_state,
+        )
 
     def search_site(
         self,

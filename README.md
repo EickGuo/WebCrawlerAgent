@@ -51,6 +51,16 @@ Typical fields include:
 
 This file is the main place where you describe what site to explore and what information you want the exported code to extract.
 
+#### `session.json`
+
+The project root also contains a local `session.json`. When exploration starts, the browser first checks whether a saved session exists for the target site.
+
+- If a valid session exists, it is reused directly.
+- If it does not exist or has expired, the workflow falls back to the existing human-intervention process.
+- After you manually complete login or verification, the session is saved locally for later reuse.
+
+This session information is only used inside the local browser tool layer. It is not exposed to the LLM and is not included in exported code.
+
 ## Usage
 
 ```bash

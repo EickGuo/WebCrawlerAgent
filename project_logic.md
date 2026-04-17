@@ -113,8 +113,8 @@ html_loader
 
 其中：
 
-- [exploration/nodes.py](/E:/learning/economic_activities/AI_coding/web_crawler_agent_local/exploration/nodes.py) 只负责节点函数
-- [exploration/graph.py](/E:/learning/economic_activities/AI_coding/web_crawler_agent_local/exploration/graph.py) 负责子图装配、路由与运行入口
+- ```exploration/nodes.py``` 只负责节点函数
+- ```exploration/graph.py``` 负责子图装配、路由与运行入口
 
 ## exploration 的输入原则
 
@@ -210,13 +210,13 @@ exploration 采用两阶段工具决策：
 
 工具说明存放于：
 
-- [tool/browser_tool_explanation/index.md](/E:/learning/economic_activities/AI_coding/web_crawler_agent_local/tool/browser_tool_explanation/index.md)
-- [tool/browser_tool_explanation]( /E:/learning/economic_activities/AI_coding/web_crawler_agent_local/tool/browser_tool_explanation )
+- ```tool/browser_tool_explanation/index.md```
+- ```tool/browser_tool_explanation```
 
 工具实现位于：
 
-- [tool/browser_tool.py](/E:/learning/economic_activities/AI_coding/web_crawler_agent_local/tool/browser_tool.py)
-- [tool/pageread_tool.py](/E:/learning/economic_activities/AI_coding/web_crawler_agent_local/tool/pageread_tool.py)
+- ```tool/browser_tool.py```
+- ```tool/pageread_tool.py```
 
 ## `sample_detail_pages` 与详情页结构分析
 
@@ -264,6 +264,24 @@ exploration 采用两阶段工具决策：
 
 如果工具执行后在进入 `state_updater` 前被 human gate 打断，子图会保留待更新状态，并在恢复后优先完成这次状态提交，避免有效工具结果丢失。
 
+## 本地登录态复用
+
+项目根目录下维护一份本地 ```session.json```，用于保存 Playwright 的站点登录态。
+
+当前逻辑是：
+
+- 进入 exploration 时，浏览器会先按目标 URL 的域名查找本地会话信息
+- 如果存在对应站点的会话，就优先复用该登录态
+- 如果本地登录态不存在或已经失效，则继续走现有的 human in the loop 流程
+- 用户手动完成登录、验证码或验证步骤后，当前上下文的登录态会写回 `session.json`
+
+这部分逻辑只存在于本地浏览器工具层：
+
+- 不进入 exploration prompt
+- 不进入主流程 prompt
+- 不暴露给任何 LLM
+- 不写入最终导出的代码
+
 ## `exploration_summary` 的作用
 
 exploration 结束后，不再把大量中间页面结构直接回传给主流程，而是生成一份面向代码生成的总结：
@@ -282,7 +300,7 @@ exploration 结束后，不再把大量中间页面结构直接回传给主流�
 
 ### 主流程日志
 
-- [debug/debug_log.json](/E:/learning/economic_activities/AI_coding/web_crawler_agent_local/debug/debug_log.json)
+- ```debug/debug_log.json```
 
 记录主流程节点级事件，例如：
 
@@ -293,7 +311,7 @@ exploration 结束后，不再把大量中间页面结构直接回传给主流�
 
 ### exploration 详细记录
 
-- [debug/exploration_record.json](/E:/learning/economic_activities/AI_coding/web_crawler_agent_local/debug/exploration_record.json)
+- ```debug/exploration_record.json```
 
 记录 exploration history 的详细流水，例如：
 
@@ -316,7 +334,7 @@ exploration 结束后，不再把大量中间页面结构直接回传给主流�
 
 最终代码写入：
 
-- [exports/final_code.py](/E:/learning/economic_activities/AI_coding/web_crawler_agent_local/exports/final_code.py)
+- ```exports/final_code.py```
 
 当前代码导出约束包括：
 
